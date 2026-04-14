@@ -12,8 +12,6 @@ qa-bot-rag/
 │   └── config.py
 ├── ui/
 │   └── gradio_app.py
-├── data/
-├── vectorstore/
 ├── requirements.txt
 ├── Dockerfile
 ├── docker-compose.yml
