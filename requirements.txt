@@ -1,0 +1,10 @@
+fastapi
+uvicorn
+gradio
+langchain
+langchain-community
+langchain-ibm
+chromadb
+ibm-watsonx-ai
+pypdf
+python-multipart
