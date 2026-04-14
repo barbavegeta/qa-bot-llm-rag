@@ -58,10 +58,10 @@ The pipeline follows a standard RAG workflow:
 
 ## Project Structure
 
-qa-bot-llm-rag/
-├── qabot.py
-├── requirements.txt
-├── README.md
+qa-bot-llm-rag/  
+├── qabot.py  
+├── requirements.txt  
+├── README.md  
 
 ---
 
