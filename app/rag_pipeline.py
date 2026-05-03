@@ -1,37 +1,72 @@
-from ibm_watsonx_ai.foundation_models import ModelInference
-from ibm_watsonx_ai.metanames import GenTextParamsMetaNames as GenParams
-from ibm_watsonx_ai.metanames import EmbedTextParamsMetaNames
-from langchain_ibm import WatsonxLLM, WatsonxEmbeddings
-from langchain.text_splitter import RecursiveCharacterTextSplitter
-from langchain_community.vectorstores import Chroma
-from langchain_community.document_loaders import PyPDFLoader
-from langchain.chains import RetrievalQA
+"""RAG pipeline for PDF question answering using IBM watsonx + LangChain."""
+
+import os
 import warnings
+from pathlib import Path
+
+from ibm_watsonx_ai.metanames import EmbedTextParamsMetaNames
+from ibm_watsonx_ai.metanames import GenTextParamsMetaNames as GenParams
+from langchain_classic.chains import RetrievalQA
+from langchain_community.document_loaders import PyPDFLoader
+from langchain_community.vectorstores import Chroma
+from langchain_ibm import WatsonxEmbeddings, WatsonxLLM
+from langchain_text_splitters import RecursiveCharacterTextSplitter
 
 warnings.filterwarnings("ignore")
 
 
-def get_llm():
-    model_id = "ibm/granite-3-2-8b-instruct"
-    parameters = {
-        GenParams.MAX_NEW_TOKENS: 256,
-        GenParams.TEMPERATURE: 0.5,
+def _watsonx_credentials() -> dict:
+    """Return watsonx credentials from environment variables."""
+    url = os.getenv("WATSONX_URL", "https://us-south.ml.cloud.ibm.com")
+    project_id = os.getenv("WATSONX_PROJECT_ID") or os.getenv("PROJECT_ID")
+    api_key = os.getenv("WATSONX_API_KEY")
+    token = os.getenv("WATSONX_TOKEN")
+
+    if not project_id:
+        raise ValueError(
+            "Missing Watsonx project ID. Set WATSONX_PROJECT_ID before running the app."
+        )
+
+    if not api_key and not token:
+        raise ValueError(
+            "Missing Watsonx credentials. Set WATSONX_API_KEY or WATSONX_TOKEN before running the app."
+        )
+
+    credentials = {
+        "url": url,
+        "project_id": project_id,
     }
-    project_id = "skills-network"
+
+    if api_key:
+        credentials["api_key"] = api_key
+    else:
+        credentials["token"] = token
+
+    return credentials
+
+
+def get_llm():
+    model_id = os.getenv("WATSONX_LLM_MODEL_ID", "ibm/granite-3-2-8b-instruct")
+    parameters = {
+        GenParams.MAX_NEW_TOKENS: int(os.getenv("WATSONX_MAX_NEW_TOKENS", "256")),
+        GenParams.TEMPERATURE: float(os.getenv("WATSONX_TEMPERATURE", "0.5")),
+    }
 
     watsonx_llm = WatsonxLLM(
         model_id=model_id,
-        url="https://us-south.ml.cloud.ibm.com",
-        project_id=project_id,
         params=parameters,
+        **_watsonx_credentials(),
     )
     return watsonx_llm
 
 
 def document_loader(file_path: str):
-    loader = PyPDFLoader(file_path)
-    loaded_document = loader.load()
-    return loaded_document
+    path = Path(file_path)
+    if not path.exists():
+        raise FileNotFoundError(f"PDF file not found: {file_path}")
+
+    loader = PyPDFLoader(str(path))
+    return loader.load()
 
 
 def text_splitter(data):
@@ -40,8 +75,7 @@ def text_splitter(data):
         chunk_overlap=200,
         length_function=len,
     )
-    chunks = splitter.split_documents(data)
-    return chunks
+    return splitter.split_documents(data)
 
 
 def watsonx_embedding():
@@ -51,10 +85,9 @@ def watsonx_embedding():
     }
 
     embedding_model = WatsonxEmbeddings(
-        model_id="ibm/slate-30m-english-rtrvr",
-        url="https://us-south.ml.cloud.ibm.com",
-        project_id="skills-network",
+        model_id=os.getenv("WATSONX_EMBEDDING_MODEL_ID", "ibm/slate-30m-english-rtrvr"),
         params=embed_params,
+        **_watsonx_credentials(),
     )
     return embedding_model
 
@@ -70,14 +103,16 @@ def vector_database(chunks):
 
 
 def retriever(file_path: str):
-    splits = document_loader(file_path)
-    chunks = text_splitter(splits)
+    documents = document_loader(file_path)
+    chunks = text_splitter(documents)
     vectordb = vector_database(chunks)
-    retriever_obj = vectordb.as_retriever()
-    return retriever_obj
+    return vectordb.as_retriever()
 
 
 def ask_question(file_path: str, query: str) -> str:
+    if not query or not query.strip():
+        raise ValueError("Query cannot be empty.")
+
     retriever_obj = retriever(file_path)
     llm = get_llm()
 
